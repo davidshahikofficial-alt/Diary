@@ -339,6 +339,107 @@
     padding:10px 0 30px;
   }
 
+  /* ---------- FLOATING MUSIC PLAYER ---------- */
+  #player{
+    position:fixed;
+    bottom:18px;right:18px;
+    z-index:30;
+    font-family:'Nunito',sans-serif;
+  }
+  #player-bubble{
+    width:56px;height:56px;
+    border-radius:50%;
+    background:var(--terracotta);
+    color:#fff;
+    border:none;
+    box-shadow:var(--shadow);
+    font-size:1.3rem;
+    display:flex;align-items:center;justify-content:center;
+  }
+  #player-panel{
+    display:none;
+    position:absolute;
+    bottom:66px;right:0;
+    width:250px;
+    background:var(--paper);
+    border-radius:18px;
+    box-shadow:var(--shadow);
+    padding:16px;
+  }
+  #player-panel.open{display:block;}
+  #player-panel .p-title{
+    font-family:'Playfair Display',serif;
+    font-size:0.95rem;
+    color:var(--ink);
+    margin-bottom:2px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  #player-panel .p-sub{
+    font-size:0.72rem;
+    color:var(--ink-soft);
+    margin-bottom:10px;
+  }
+  .p-controls{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    margin-bottom:12px;
+  }
+  .p-controls button{
+    background:none;border:none;
+    font-size:1.15rem;
+    color:var(--terracotta-dark);
+  }
+  .p-controls button.play-pause{
+    background:var(--terracotta);
+    color:#fff;
+    width:38px;height:38px;
+    border-radius:50%;
+    font-size:1rem;
+  }
+  .p-slider-row{
+    margin-bottom:10px;
+  }
+  .p-slider-row label{
+    font-size:0.7rem;
+    color:var(--ink-soft);
+    display:flex;
+    justify-content:space-between;
+    margin-bottom:3px;
+  }
+  .p-slider-row input[type="range"]{
+    width:100%;
+    accent-color:var(--terracotta);
+  }
+  #player-tracklist{
+    display:flex;flex-direction:column;gap:4px;
+    max-height:110px;
+    overflow-y:auto;
+  }
+  .p-track{
+    text-align:left;
+    background:none;
+    border:none;
+    padding:6px 8px;
+    border-radius:8px;
+    font-size:0.78rem;
+    color:var(--ink-soft);
+  }
+  .p-track.active{
+    background:#fdf0e6;
+    color:var(--terracotta-dark);
+    font-weight:700;
+  }
+  #player-note{
+    font-size:0.65rem;
+    color:#c7b9a8;
+    margin-top:8px;
+    line-height:1.4;
+  }
+
   /* modal for viewing/editing an entry */
   #entry-modal{
     position:fixed;inset:0;
@@ -439,6 +540,30 @@
   </main>
 
   <footer>made with care, just for you 🤎</footer>
+</div>
+
+<!-- FLOATING MUSIC PLAYER -->
+<div id="player">
+  <div id="player-panel">
+    <div class="p-title" id="p-track-title">No song loaded</div>
+    <div class="p-sub" id="p-track-status">tap a track to play</div>
+    <div class="p-controls">
+      <button id="p-prev" title="Previous">⏮</button>
+      <button id="p-play" class="play-pause" title="Play/Pause">▶</button>
+      <button id="p-next" title="Next">⏭</button>
+    </div>
+    <div class="p-slider-row">
+      <label><span>Reverb</span><span id="p-reverb-val">35%</span></label>
+      <input type="range" id="p-reverb" min="0" max="100" value="35" />
+    </div>
+    <div class="p-slider-row">
+      <label><span>Volume</span><span id="p-vol-val">70%</span></label>
+      <input type="range" id="p-vol" min="0" max="100" value="70" />
+    </div>
+    <div id="player-tracklist"></div>
+    <div id="player-note">Add your song files next to this page (see setup note) to enable playback.</div>
+  </div>
+  <button id="player-bubble">🎵</button>
 </div>
 
 <div id="entry-modal">
@@ -670,6 +795,153 @@ function openModal(entry){
   modalBody.textContent = entry.content;
   modal.style.display = 'flex';
 }
+
+// ---------- FLOATING MUSIC PLAYER (Web Audio API reverb, live) ----------
+const PLAYLIST = [
+  { title: 'Firfirey',        file: 'track1.mp3' },
+  { title: 'Kasari',          file: 'track2.mp3' },
+  { title: 'Laakhau Hajarau', file: 'track3.mp3' }
+];
+
+let audioCtx = null;
+let sourceNode = null;
+let convolver = null;
+let dryGain = null;
+let wetGain = null;
+let masterGain = null;
+let currentTrack = 0;
+let isPlaying = false;
+
+const audioEl = new Audio();
+audioEl.crossOrigin = 'anonymous';
+audioEl.preload = 'none';
+
+const bubble = document.getElementById('player-bubble');
+const panel = document.getElementById('player-panel');
+const trackTitleEl = document.getElementById('p-track-title');
+const trackStatusEl = document.getElementById('p-track-status');
+const playBtn = document.getElementById('p-play');
+const prevBtn = document.getElementById('p-prev');
+const nextBtn = document.getElementById('p-next');
+const reverbSlider = document.getElementById('p-reverb');
+const reverbVal = document.getElementById('p-reverb-val');
+const volSlider = document.getElementById('p-vol');
+const volVal = document.getElementById('p-vol-val');
+const tracklistEl = document.getElementById('player-tracklist');
+
+function buildTracklist(){
+  tracklistEl.innerHTML = '';
+  PLAYLIST.forEach((t, i)=>{
+    const b = document.createElement('button');
+    b.className = 'p-track' + (i === currentTrack ? ' active' : '');
+    b.textContent = t.title;
+    b.addEventListener('click', ()=> loadTrack(i, true));
+    tracklistEl.appendChild(b);
+  });
+}
+buildTracklist();
+
+bubble.addEventListener('click', ()=>{
+  panel.classList.toggle('open');
+});
+
+function ensureAudioGraph(){
+  if(audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  sourceNode = audioCtx.createMediaElementSource(audioEl);
+  convolver = audioCtx.createConvolver();
+  convolver.buffer = makeImpulseResponse(audioCtx, 2.4, 2.8);
+  dryGain = audioCtx.createGain();
+  wetGain = audioCtx.createGain();
+  masterGain = audioCtx.createGain();
+
+  const reverbAmt = reverbSlider.value / 100;
+  wetGain.gain.value = reverbAmt;
+  dryGain.gain.value = 1 - reverbAmt * 0.5;
+  masterGain.gain.value = volSlider.value / 100;
+
+  sourceNode.connect(dryGain).connect(masterGain);
+  sourceNode.connect(convolver).connect(wetGain).connect(masterGain);
+  masterGain.connect(audioCtx.destination);
+}
+
+function makeImpulseResponse(ctx, duration, decay){
+  const rate = ctx.sampleRate;
+  const length = rate * duration;
+  const impulse = ctx.createBuffer(2, length, rate);
+  for(let ch = 0; ch < 2; ch++){
+    const data = impulse.getChannelData(ch);
+    for(let i = 0; i < length; i++){
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    }
+  }
+  return impulse;
+}
+
+function loadTrack(i, autoplay){
+  currentTrack = i;
+  const t = PLAYLIST[i];
+  audioEl.src = t.file;
+  trackTitleEl.textContent = t.title;
+  trackStatusEl.textContent = autoplay ? 'loading...' : 'ready';
+  buildTracklist();
+  if(autoplay){
+    ensureAudioGraph();
+    audioEl.play().then(()=>{
+      isPlaying = true;
+      playBtn.textContent = '⏸';
+      trackStatusEl.textContent = 'now playing';
+    }).catch(()=>{
+      trackStatusEl.textContent = "couldn't find " + t.file + ' — add it next to this page';
+    });
+  }
+}
+loadTrack(0, false);
+
+playBtn.addEventListener('click', ()=>{
+  ensureAudioGraph();
+  if(audioCtx.state === 'suspended') audioCtx.resume();
+  if(isPlaying){
+    audioEl.pause();
+    isPlaying = false;
+    playBtn.textContent = '▶';
+    trackStatusEl.textContent = 'paused';
+  } else {
+    audioEl.play().then(()=>{
+      isPlaying = true;
+      playBtn.textContent = '⏸';
+      trackStatusEl.textContent = 'now playing';
+    }).catch(()=>{
+      trackStatusEl.textContent = "couldn't find " + PLAYLIST[currentTrack].file + ' — add it next to this page';
+    });
+  }
+});
+
+prevBtn.addEventListener('click', ()=>{
+  const i = (currentTrack - 1 + PLAYLIST.length) % PLAYLIST.length;
+  loadTrack(i, true);
+});
+nextBtn.addEventListener('click', ()=>{
+  const i = (currentTrack + 1) % PLAYLIST.length;
+  loadTrack(i, true);
+});
+audioEl.addEventListener('ended', ()=>{
+  const i = (currentTrack + 1) % PLAYLIST.length;
+  loadTrack(i, true);
+});
+
+reverbSlider.addEventListener('input', ()=>{
+  const v = reverbSlider.value / 100;
+  reverbVal.textContent = reverbSlider.value + '%';
+  if(wetGain && dryGain){
+    wetGain.gain.value = v;
+    dryGain.gain.value = 1 - v * 0.5;
+  }
+});
+volSlider.addEventListener('input', ()=>{
+  volVal.textContent = volSlider.value + '%';
+  if(masterGain) masterGain.gain.value = volSlider.value / 100;
+});
 </script>
 </body>
 </html>
